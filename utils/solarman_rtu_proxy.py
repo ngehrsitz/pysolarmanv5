@@ -19,18 +19,14 @@ from functools import partial
 
 from pysolarmanv5 import PySolarmanV5Async
 
+lock = asyncio.Lock()
+
 
 async def handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
-    logger_address: str,
-    logger_serial: int,
+    solarmanv5: PySolarmanV5Async,
 ):
-    solarmanv5 = PySolarmanV5Async(
-        logger_address, logger_serial, verbose=True, auto_reconnect=True
-    )
-    await solarmanv5.connect()
-
     addr = writer.get_extra_info("peername")
 
     print(f"{addr}: New connection")
@@ -41,7 +37,8 @@ async def handle_client(
             if not modbus_request:
                 break
             try:
-                reply = await solarmanv5.send_raw_modbus_frame(modbus_request)
+                async with lock:
+                    reply = await solarmanv5.send_raw_modbus_frame(modbus_request)
                 writer.write(reply)
             except:
                 pass
@@ -52,16 +49,18 @@ async def handle_client(
         pass
 
     print(f"{addr}: Connection closed")
-    await solarmanv5.disconnect()
 
 
 async def run_proxy(
     bind_address: str, port: int, logger_address: str, logger_serial: int
 ):
+    solarmanv5 = PySolarmanV5Async(
+        logger_address, logger_serial, verbose=True, auto_reconnect=True
+    )
+    print(f"Connecting to logger {logger_address}")
+    await solarmanv5.connect()
     server = await asyncio.start_server(
-        partial(
-            handle_client, logger_address=logger_address, logger_serial=logger_serial
-        ),
+        partial(handle_client, solarmanv5=solarmanv5),
         bind_address,
         port,
     )
